@@ -82,41 +82,96 @@ module user_project_wrapper #(
 /* User project is instantiated  here   */
 /*--------------------------------------*/
 
-user_proj_example mprj (
-`ifdef USE_POWER_PINS
-	.vccd1(vccd1),	// User area 1 1.8V power
-	.vssd1(vssd1),	// User area 1 digital ground
-`endif
+    // Address decoding: Each SRAM gets 64KB (16384 words * 4 bytes = 65536 bytes)
+    // SRAM 0: 0x00000000 - 0x0000FFFF
+    // SRAM 1: 0x00010000 - 0x0001FFFF
+    // SRAM 2: 0x00020000 - 0x0002FFFF
+    wire [1:0] sram_sel;
+    assign sram_sel = wbs_adr_i[17:16];  // Upper 2 bits of address select which SRAM
 
-    .wb_clk_i(wb_clk_i),
-    .wb_rst_i(wb_rst_i),
+    // Internal signals for each SRAM instance
+    wire wbs_ack_o_0, wbs_ack_o_1, wbs_ack_o_2;
+    wire [31:0] wbs_dat_o_0, wbs_dat_o_1, wbs_dat_o_2;
+    wire wbs_stb_i_0, wbs_stb_i_1, wbs_stb_i_2;
 
-    // MGMT SoC Wishbone Slave
+    // Address decoding: only assert strobe for the selected SRAM
+    assign wbs_stb_i_0 = wbs_stb_i && (sram_sel == 2'b00);
+    assign wbs_stb_i_1 = wbs_stb_i && (sram_sel == 2'b01);
+    assign wbs_stb_i_2 = wbs_stb_i && (sram_sel == 2'b10);
 
-    .wbs_cyc_i(wbs_cyc_i),
-    .wbs_stb_i(wbs_stb_i),
-    .wbs_we_i(wbs_we_i),
-    .wbs_sel_i(wbs_sel_i),
-    .wbs_adr_i(wbs_adr_i),
-    .wbs_dat_i(wbs_dat_i),
-    .wbs_ack_o(wbs_ack_o),
-    .wbs_dat_o(wbs_dat_o),
+    // Combine acknowledge signals
+    assign wbs_ack_o = wbs_ack_o_0 | wbs_ack_o_1 | wbs_ack_o_2;
 
-    // Logic Analyzer
+    // Multiplex data outputs based on which SRAM responded
+    assign wbs_dat_o = (sram_sel == 2'b00) ? wbs_dat_o_0 :
+                       (sram_sel == 2'b01) ? wbs_dat_o_1 :
+                       (sram_sel == 2'b10) ? wbs_dat_o_2 : 32'b0;
 
-    .la_data_in(la_data_in),
-    .la_data_out(la_data_out),
-    .la_oenb (la_oenb),
+    // SRAM instance 0 (base address)
+    CF_SRAM_16384x32 sram (
+    `ifdef USE_POWER_PINS
+        .VPWR(vccd1),   // User area 1 1.8V power
+        .VGND(vssd1),   // User area 1 digital ground
+    `endif
 
-    // IO Pads
+        // Wishbone Bus Interface
+        .wb_clk_i(wb_clk_i),
+        .wb_rst_i(wb_rst_i),
+        .wbs_stb_i(wbs_stb_i_0),
+        .wbs_cyc_i(wbs_cyc_i),
+        .wbs_we_i(wbs_we_i),
+        .wbs_sel_i(wbs_sel_i),
+        .wbs_dat_i(wbs_dat_i),
+        .wbs_adr_i(wbs_adr_i[15:0]),  // Lower 16 bits for 64KB address space
+        .wbs_ack_o(wbs_ack_o_0),
+        .wbs_dat_o(wbs_dat_o_0)
+    );
 
-    .io_in ({io_in[37:30],io_in[7:0]}),
-    .io_out({io_out[37:30],io_out[7:0]}),
-    .io_oeb({io_oeb[37:30],io_oeb[7:0]}),
+    // SRAM instance 1 (offset 0x10000)
+    CF_SRAM_16384x32 sram1 (
+    `ifdef USE_POWER_PINS
+        .VPWR(vccd1),   // User area 1 1.8V power
+        .VGND(vssd1),   // User area 1 digital ground
+    `endif
 
-    // IRQ
-    .irq(user_irq)
-);
+        // Wishbone Bus Interface
+        .wb_clk_i(wb_clk_i),
+        .wb_rst_i(wb_rst_i),
+        .wbs_stb_i(wbs_stb_i_1),
+        .wbs_cyc_i(wbs_cyc_i),
+        .wbs_we_i(wbs_we_i),
+        .wbs_sel_i(wbs_sel_i),
+        .wbs_dat_i(wbs_dat_i),
+        .wbs_adr_i(wbs_adr_i[15:0]),  // Lower 16 bits for 64KB address space
+        .wbs_ack_o(wbs_ack_o_1),
+        .wbs_dat_o(wbs_dat_o_1)
+    );
+
+    // SRAM instance 2 (offset 0x20000)
+    CF_SRAM_16384x32 sram2 (
+    `ifdef USE_POWER_PINS
+        .VPWR(vccd1),   // User area 1 1.8V power
+        .VGND(vssd1),   // User area 1 digital ground
+    `endif
+
+        // Wishbone Bus Interface
+        .wb_clk_i(wb_clk_i),
+        .wb_rst_i(wb_rst_i),
+        .wbs_stb_i(wbs_stb_i_2),
+        .wbs_cyc_i(wbs_cyc_i),
+        .wbs_we_i(wbs_we_i),
+        .wbs_sel_i(wbs_sel_i),
+        .wbs_dat_i(wbs_dat_i),
+        .wbs_adr_i(wbs_adr_i[15:0]),  // Lower 16 bits for 64KB address space
+        .wbs_ack_o(wbs_ack_o_2),
+        .wbs_dat_o(wbs_dat_o_2)
+    );
+
+// Tie off unused outputs
+assign la_data_out = 128'b0;
+assign io_out = {`MPRJ_IO_PADS{1'b0}};
+assign io_oeb = {`MPRJ_IO_PADS{1'b1}};  // Set all IOs as inputs (output enable bar = 1)
+assign user_irq = 3'b0;
 
 endmodule	// user_project_wrapper
 
